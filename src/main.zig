@@ -1,3 +1,5 @@
+/// To learn more about zig, I decided to write a little asteroids clone with raylib. :)
+/// Due for a massive refactor, but at least it's pretty fun to play!
 const std = @import("std");
 const rl = @import("raylib");
 const drawUtil = @import("./util/draw-util.zig");
@@ -15,6 +17,9 @@ const Projectile = struct {
 const Asteroid = struct {
     radius: f32,
     position: Vector2,
+    direction: Vector2 = Vector2.init(0, 0),
+    speed: f32,
+    hp: i8 = 1,
 };
 
 const ShipObject = struct {
@@ -28,7 +33,10 @@ const ShipObject = struct {
 const StateObject = struct {
     projectiles: std.ArrayList(Projectile),
     asteroids: std.ArrayList(Asteroid),
+    score: i64 = 0,
+    deltaTime: f32 = 0.0,
     elapsedTime: f32 = 0.0,
+    lastSpawn: f32 = -1000.0,
     ship: ShipObject,
 };
 
@@ -38,6 +46,7 @@ const AsteroidSize = enum { SMALL, MEDIUM, BIG };
 // CONSTANTS //////////////////////////////////////
 const CANVAS_SIZE = Vector2.init(640, 480);
 var alloc: std.mem.Allocator = undefined;
+var rng: std.Random = undefined;
 
 // STATE //////////////////////////////////////
 var state: StateObject = undefined;
@@ -52,10 +61,10 @@ fn wrapPosition(vec: Vector2) Vector2 {
     );
 }
 
-fn inBounds(origin: Vector2, bounds: Vector2) bool {
+fn inScreenBounds(origin: Vector2, bounds: Vector2) bool {
     const br = origin.add(bounds.scale(0.5));
     const tl = origin.subtract(bounds.scale(0.5));
-    return (br.x < CANVAS_SIZE.x) and (tl.x > 0) and (br.y < CANVAS_SIZE.y) and br.y > 0;
+    return (br.y > 0) and (tl.y < CANVAS_SIZE.y) or (br.x > 0) and (tl.y < CANVAS_SIZE.y);
 }
 
 fn fireProjectile(origin: Vector2, direction: Vector2) !void {
@@ -66,11 +75,29 @@ fn fireProjectile(origin: Vector2, direction: Vector2) !void {
     });
 }
 
-fn createAsteroid(position: Vector2, radius: f32) !void {
+fn createAsteroid(position: Vector2, radius: f32, speed: f32, direction: Vector2) !void {
     try state.asteroids.append(.{
         .position = position,
         .radius = radius,
+        .speed = speed,
+        .direction = direction,
     });
+}
+
+fn resetGame() void {
+    state.projectiles.clearAndFree();
+    state.asteroids.clearAndFree();
+
+    state = .{
+        .ship = .{
+            .position = CANVAS_SIZE.scale(0.5),
+            .scale = 15,
+        },
+        .score = 0,
+        .projectiles = state.projectiles,
+        .asteroids = state.asteroids,
+        .elapsedTime = 0,
+    };
 }
 
 // LIFECYCLE //////////////////////////////////////
@@ -124,18 +151,62 @@ fn render() !void {
         );
 
         // Check if the projectile is on screen. If not, attempt to remove it.
-        if (!inBounds(projectile.position, Vector2.one())) {
+        if (!inScreenBounds(projectile.position, Vector2.one())) {
             // Prevent null access.
-            if (i > state.projectiles.items.len - 1) continue;
-            _ = state.projectiles.orderedRemove(i);
-            continue;
+            if (!(i > state.projectiles.items.len - 1)) {
+                _ = state.projectiles.orderedRemove(i);
+            }
         }
 
         rl.drawCircleV(projectile.position, 1.0, rl.Color.white);
     }
 
     // Asteroids
-    for (state.asteroids.items) |*asteroid| {
+    for (state.asteroids.items, 0..) |*asteroid, i| {
+        asteroid.position = asteroid.position.add(
+            asteroid.direction.scale(asteroid.speed * state.deltaTime),
+        );
+
+        // Check if the projectile is on screen. If not, attempt to remove it.
+        if (!inScreenBounds(asteroid.position, Vector2.one().scale(asteroid.radius))) {
+            // Prevent null access.
+            if (i < state.asteroids.items.len) {
+                _ = state.asteroids.orderedRemove(i);
+            }
+        }
+
+        const asteroidBB = rl.Rectangle.init(
+            asteroid.position.x - asteroid.radius,
+            asteroid.position.y - asteroid.radius,
+            asteroid.radius * 2,
+            asteroid.radius * 2,
+        );
+
+        const playerBB = rl.Rectangle.init(
+            state.ship.position.x - (state.ship.scale / 2),
+            state.ship.position.y,
+            state.ship.scale,
+            state.ship.scale,
+        );
+
+        if (asteroidBB.checkCollision(playerBB)) {
+            resetGame();
+            return;
+        }
+
+        // collision
+        for (state.projectiles.items) |*projectile| {
+            const projectileBB = rl.Rectangle.init(projectile.position.x, projectile.position.y, 2.0, 2.0);
+            if (projectileBB.checkCollision(asteroidBB)) {
+                if (i < state.asteroids.items.len) {
+                    _ = state.asteroids.orderedRemove(i);
+                    state.score += 1;
+                }
+            }
+
+            //rl.checkCollisionRecs(rec1: Rectangle, rec2: Rectangle)
+        }
+
         rl.drawCircleLinesV(asteroid.position, asteroid.radius, rl.Color.red);
     }
 
@@ -143,7 +214,7 @@ fn render() !void {
     drawUtil.drawLines(
         state.ship.position,
         1,
-        15,
+        state.ship.scale,
         state.ship.rotation,
         &.{
             Vector2.init(-0.4, -0.5),
@@ -151,36 +222,49 @@ fn render() !void {
             Vector2.init(0.4, -0.5),
             Vector2.init(-0.4, -0.5),
         },
-        rl.Color.red,
+        rl.Color.blue,
     );
 
     // [0:*] denotes that the array is null-terminated (unknown length).
     // https://discord.com/channels/605571803288698900/1333448529187967147/1333453897494302750
-    const ref = try std.fmt.allocPrintZ(alloc, "Frame Time: {d:.2}", .{state.deltaTime});
+    const ref = try std.fmt.allocPrintZ(alloc, "Score: {any} | Time Alive: {d:.2}", .{ state.score, state.elapsedTime });
     defer alloc.free(ref);
 
     rl.drawText(
         ref,
         5,
         5,
-        12,
+        20,
         rl.Color.white,
     );
 }
 
 pub fn main() !void {
+    // 1 Every X seconds.
+    const SPAWN_RATE = 0.5;
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa.deinit() == .ok);
     alloc = gpa.allocator();
 
-    rl.initWindow(CANVAS_SIZE.x, CANVAS_SIZE.y, "Zig Game");
-    defer rl.closeWindow(); // Close window and OpenGL context
-    rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
+    // Random number generato (Xoshiro256)
+    var prng = std.rand.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
 
-    // Initialize our space ship.
+    rng = prng.random();
+
+    rl.initWindow(CANVAS_SIZE.x, CANVAS_SIZE.y, "Zig Game");
+    defer rl.closeWindow();
+    rl.setTargetFPS(60);
+
+    // Initialize our state
     state = .{
         .ship = .{
             .position = CANVAS_SIZE.scale(0.5),
+            .scale = 15,
         },
         .projectiles = std.ArrayList(Projectile).init(alloc),
         .asteroids = std.ArrayList(Asteroid).init(alloc),
@@ -189,13 +273,24 @@ pub fn main() !void {
     defer state.projectiles.deinit();
     defer state.asteroids.deinit();
 
-    // TEMP
-    try createAsteroid(Vector2.init(50, 50), 20);
-
     // Main game loop
     while (!rl.windowShouldClose()) { // Detect window close button or ESC key
         state.deltaTime = rl.getFrameTime();
         state.elapsedTime += state.deltaTime;
+
+        if (state.elapsedTime - state.lastSpawn > SPAWN_RATE) {
+            state.lastSpawn = state.elapsedTime;
+            const xEdge = @as(f32, @floatFromInt(rng.intRangeAtMost(i8, 0, 1))) * CANVAS_SIZE.x;
+            const yEdge = @as(f32, @floatFromInt(rng.intRangeAtMost(i8, 0, 1))) * CANVAS_SIZE.y;
+
+            const goal = Vector2.init(
+                @as(f32, @floatFromInt(rng.intRangeAtMost(i32, CANVAS_SIZE.x * 0.25, CANVAS_SIZE.x * 0.75))),
+                @as(f32, @floatFromInt(rng.intRangeAtMost(i32, CANVAS_SIZE.y * 0.25, CANVAS_SIZE.y * 0.75))),
+            );
+
+            const origin = Vector2.init(xEdge, yEdge);
+            try createAsteroid(origin, rng.float(f32) * 10 + 10, ((rng.float(f32) * 50) + 100.0), goal.subtract(origin).normalize());
+        }
 
         rl.beginDrawing();
         defer rl.endDrawing();
