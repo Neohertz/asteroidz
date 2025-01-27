@@ -12,6 +12,11 @@ const Projectile = struct {
     direction: Vector2,
 };
 
+const Asteroid = struct {
+    radius: f32,
+    position: Vector2,
+};
+
 const ShipObject = struct {
     position: Vector2,
     velocity: Vector2 = Vector2.init(0, 0),
@@ -22,10 +27,13 @@ const ShipObject = struct {
 
 const StateObject = struct {
     projectiles: std.ArrayList(Projectile),
+    asteroids: std.ArrayList(Asteroid),
     elapsedTime: f32 = 0.0,
-    deltaTime: f32 = 0.0,
     ship: ShipObject,
 };
+
+// ENUM //////////////////////////////////////
+const AsteroidSize = enum { SMALL, MEDIUM, BIG };
 
 // CONSTANTS //////////////////////////////////////
 const CANVAS_SIZE = Vector2.init(640, 480);
@@ -55,6 +63,13 @@ fn fireProjectile(origin: Vector2, direction: Vector2) !void {
         .direction = direction,
         .position = origin,
         .speed = 350,
+    });
+}
+
+fn createAsteroid(position: Vector2, radius: f32) !void {
+    try state.asteroids.append(.{
+        .position = position,
+        .radius = radius,
     });
 }
 
@@ -119,7 +134,11 @@ fn render() !void {
         rl.drawCircleV(projectile.position, 1.0, rl.Color.white);
     }
 
-    std.debug.print("Items: {any}\n", .{state.projectiles.items.len});
+    // Asteroids
+    for (state.asteroids.items) |*asteroid| {
+        rl.drawCircleLinesV(asteroid.position, asteroid.radius, rl.Color.red);
+    }
+
     // Draw the ship
     drawUtil.drawLines(
         state.ship.position,
@@ -164,9 +183,14 @@ pub fn main() !void {
             .position = CANVAS_SIZE.scale(0.5),
         },
         .projectiles = std.ArrayList(Projectile).init(alloc),
+        .asteroids = std.ArrayList(Asteroid).init(alloc),
     };
 
     defer state.projectiles.deinit();
+    defer state.asteroids.deinit();
+
+    // TEMP
+    try createAsteroid(Vector2.init(50, 50), 20);
 
     // Main game loop
     while (!rl.windowShouldClose()) { // Detect window close button or ESC key
