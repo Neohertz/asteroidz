@@ -2,6 +2,8 @@
 /// Due for a massive refactor, but at least it's pretty fun to play!
 const std = @import("std");
 const rl = @import("raylib");
+const gui = @import("raygui");
+
 const drawUtil = @import("./util/draw-util.zig");
 const particle = @import("./particles/particle.zig");
 
@@ -302,6 +304,9 @@ pub fn main() !void {
     defer state.projectiles.deinit();
     defer state.asteroids.deinit();
 
+    const color = try alloc.alloc(rl.Color, 1);
+    defer alloc.free(color);
+
     // Main game loop
     while (!rl.windowShouldClose()) { // Detect window close button or ESC key
         state.deltaTime = rl.getFrameTime();
@@ -318,13 +323,21 @@ pub fn main() !void {
             );
 
             const origin = Vector2.init(xEdge, yEdge);
-            try createAsteroid(origin, rng.float(f32) * 10 + 10, ((rng.float(f32) * 50) + 100.0), goal.subtract(origin).normalize());
+
+            try createAsteroid(
+                origin,
+                rng.float(f32) * 10 + 10,
+                ((rng.float(f32) * 50) + 100.0),
+                goal.subtract(origin).normalize(),
+            );
         }
 
         rl.beginDrawing();
         defer rl.endDrawing();
+
         rl.clearBackground(rl.Color.black);
 
         try render();
+        // _ = gui.guiColorPicker(.{ .height = 100.0, .width = 200.0, .x = 100.0, .y = 100.0 }, "This is a test!", &color[0]);
     }
 }
