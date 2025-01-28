@@ -3,6 +3,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 const drawUtil = @import("./util/draw-util.zig");
+const particle = @import("./particles/particle.zig");
 
 const Vector2 = rl.Vector2;
 const math = std.math;
@@ -25,9 +26,10 @@ const Asteroid = struct {
 const ShipObject = struct {
     position: Vector2,
     velocity: Vector2 = Vector2.init(0, 0),
-    scale: f32 = 1,
+    scale: f32 = 20,
     rotation: f32 = 0,
     lastShotAt: f32 = 0,
+    flying: bool = false,
 };
 
 const StateObject = struct {
@@ -44,9 +46,10 @@ const StateObject = struct {
 const AsteroidSize = enum { SMALL, MEDIUM, BIG };
 
 // CONSTANTS //////////////////////////////////////
-const CANVAS_SIZE = Vector2.init(640, 480);
+const CANVAS_SIZE = Vector2.init(1200, 800);
 var alloc: std.mem.Allocator = undefined;
 var rng: std.Random = undefined;
+var rocketParticle: particle.Emitter = undefined;
 
 // STATE //////////////////////////////////////
 var state: StateObject = undefined;
@@ -91,7 +94,6 @@ fn resetGame() void {
     state = .{
         .ship = .{
             .position = CANVAS_SIZE.scale(0.5),
-            .scale = 15,
         },
         .score = 0,
         .projectiles = state.projectiles,
@@ -128,13 +130,22 @@ fn render() !void {
 
     // Move ship (velocity)
     if (rl.isKeyDown(.w)) {
+        state.ship.flying = true;
         state.ship.velocity = state.ship.velocity.add(
             shipDir.scale(SHIP_SPEED * state.deltaTime),
         );
+    } else {
+        state.ship.flying = false;
     }
 
     state.ship.velocity = state.ship.velocity.scale(1.0 - SHIP_DRAG);
     state.ship.position = wrapPosition(state.ship.position.add(state.ship.velocity));
+
+    // Particles
+    rocketParticle.config.rotation = state.ship.rotation;
+    rocketParticle.config.position = state.ship.position.subtract(shipDir.scale(12));
+    rocketParticle.enabled = state.ship.flying;
+    try rocketParticle.step(state.deltaTime);
 
     // Projectiles
     if (rl.isKeyPressed(.space)) {
@@ -227,7 +238,12 @@ fn render() !void {
 
     // [0:*] denotes that the array is null-terminated (unknown length).
     // https://discord.com/channels/605571803288698900/1333448529187967147/1333453897494302750
-    const ref = try std.fmt.allocPrintZ(alloc, "Score: {any} | Time Alive: {d:.2}", .{ state.score, state.elapsedTime });
+    const ref = try std.fmt.allocPrintZ(alloc, "Score: {any} | FPS: {any} | Time Alive: {d:.2} | Frame Time: {d:.2} ", .{
+        state.score,
+        rl.getFPS(),
+        state.elapsedTime,
+        state.deltaTime,
+    });
     defer alloc.free(ref);
 
     rl.drawText(
@@ -256,15 +272,28 @@ pub fn main() !void {
 
     rng = prng.random();
 
+    rocketParticle = try particle.CreateEmitter(alloc, rng, .{
+        .shape = .CIRCLE,
+        .rate = 0.0,
+        .lifetime = 1,
+        .position = Vector2.init(CANVAS_SIZE.x / 2.0, CANVAS_SIZE.y / 2.0),
+        .velocity = 300,
+        .sprayAngle = 90 * math.rad_per_deg,
+        .rotation = 0,
+        .opacity = .{ .start = 0.3, .end = 1.0 },
+        .size = .{ .start = 5.0, .end = 0 },
+        .color = .{ .start = rl.Color.red, .end = rl.Color.green },
+    });
+    defer rocketParticle.deinit();
+
     rl.initWindow(CANVAS_SIZE.x, CANVAS_SIZE.y, "Zig Game");
     defer rl.closeWindow();
-    rl.setTargetFPS(60);
+    rl.setTargetFPS(120);
 
     // Initialize our state
     state = .{
         .ship = .{
             .position = CANVAS_SIZE.scale(0.5),
-            .scale = 15,
         },
         .projectiles = std.ArrayList(Projectile).init(alloc),
         .asteroids = std.ArrayList(Asteroid).init(alloc),
