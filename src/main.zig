@@ -1,5 +1,10 @@
 /// To learn more about zig, I decided to write a little asteroids clone with raylib. :)
 /// Due for a massive refactor, but at least it's pretty fun to play!
+///
+/// REWRITE NOTES:
+/// - Adopt native zig ecs (https://github.com/prime31/zig-ecs)
+/// - Fix the clutter. Move redundant operations to public functions.
+///
 const std = @import("std");
 const rl = @import("raylib");
 const gui = @import("raygui");
@@ -41,6 +46,8 @@ const StateObject = struct {
     deltaTime: f32 = 0.0,
     elapsedTime: f32 = 0.0,
     lastSpawn: f32 = -1000.0,
+    spawnRate: f32 = 0.5,
+    asteroidSpeed: f32 = 100,
     ship: ShipObject,
 };
 
@@ -89,11 +96,14 @@ fn createAsteroid(position: Vector2, radius: f32, speed: f32, direction: Vector2
     });
 }
 
+// FIX: this is kinda bad
 fn resetGame() void {
     state.projectiles.clearAndFree();
     state.asteroids.clearAndFree();
 
     state = .{
+        .asteroidSpeed = 100,
+        .spawnRate = 0.5,
         .ship = .{
             .position = CANVAS_SIZE.scale(0.5),
         },
@@ -112,7 +122,7 @@ fn render() !void {
     // Pixels per second.
     const SHIP_SPEED = 10;
     // Per Second
-    const FIRE_RATE = 5;
+    const FIRE_RATE = 2;
 
     // Rotate the Ship
     if (rl.isKeyDown(.d)) {
@@ -259,7 +269,6 @@ fn render() !void {
 
 pub fn main() !void {
     // 1 Every X seconds.
-    const SPAWN_RATE = 0.5;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa.deinit() == .ok);
@@ -284,7 +293,7 @@ pub fn main() !void {
         .rotation = 0,
         .opacity = .{ .start = 0.3, .end = 1.0 },
         .size = .{ .start = 5.0, .end = 0 },
-        .color = .{ .start = rl.Color.red, .end = rl.Color.green },
+        .color = .{ .start = rl.Color.red, .end = rl.Color.orange },
     });
     defer rocketParticle.deinit();
 
@@ -312,7 +321,10 @@ pub fn main() !void {
         state.deltaTime = rl.getFrameTime();
         state.elapsedTime += state.deltaTime;
 
-        if (state.elapsedTime - state.lastSpawn > SPAWN_RATE) {
+        state.spawnRate -= state.deltaTime / 1000;
+        state.asteroidSpeed += state.deltaTime * 10;
+
+        if (state.elapsedTime - state.lastSpawn > state.spawnRate) {
             state.lastSpawn = state.elapsedTime;
             const xEdge = @as(f32, @floatFromInt(rng.intRangeAtMost(i8, 0, 1))) * CANVAS_SIZE.x;
             const yEdge = @as(f32, @floatFromInt(rng.intRangeAtMost(i8, 0, 1))) * CANVAS_SIZE.y;
@@ -327,7 +339,7 @@ pub fn main() !void {
             try createAsteroid(
                 origin,
                 rng.float(f32) * 10 + 10,
-                ((rng.float(f32) * 50) + 100.0),
+                state.asteroidSpeed,
                 goal.subtract(origin).normalize(),
             );
         }
